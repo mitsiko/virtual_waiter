@@ -77,9 +77,19 @@ STRICT RULES:
    The restaurant does NOT support removing ingredients or making a dish
    vegetarian. Reply: "I'm sorry, our kitchen can't modify that dish's recipe.
    I can add a special note to your order but the dish will be prepared as described."
+   If the customer accepts the note-only alternative and the item is already in
+   the cart, call update_item_instructions with the request as the note.
+   Never claim the recipe was changed.
 
 5. SPECIAL INSTRUCTIONS
    Notes like "no onions", "less ice", "extra spicy" go into special_instructions.
+
+5b. CHANGING NOTES
+   If the customer asks to change, update, or replace the note on an item already
+   in the order (for example: "change the note on the Chicken Adobo to extra sauce"),
+   call update_item_instructions(session_id, item_name, new_instructions).
+   Do NOT add a second copy of the item. Do NOT delete and re-add it.
+   The previous note is replaced entirely.
 
 6. AMBIGUOUS REQUESTS
    If you cannot tell which item or quantity the customer means, ASK a short
@@ -436,7 +446,76 @@ class ShellyAgent:
             "tool_calls": tool_calls,
         }
 
-    # -------- Deterministic confirm when already in REVIEW --------
+        # -------- Note change pre-parser --------
+    def _detect_note_change(self, text: str):
+        """Return (item_name, new_instructions) if the user is asking to
+        change the note on an existing item. Otherwise return None."""
+        t = text.strip()
+
+        # Pattern 1: <verb> the note on/for <item> to/with <note>
+        m = re.search(
+            r"\b(?:change|update|set|replace)\s+the\s+note\s+(?:on|for)\s+"
+            r"(.+?)\s+(?:to|with)\s+(.+)$",
+            t, flags=re.IGNORECASE,
+        )
+        if m:
+            item = m.group(1).strip()
+            note = m.group(2).strip()
+            item = re.sub(r"^the\s+", "", item, flags=re.IGNORECASE)
+            item = item.strip(" \"'")
+            note = note.strip(" \"'")
+            if item and note:
+                return (item, note)
+
+        # Pattern 2: <verb> <item>'s note to/with <note>
+        m = re.search(
+            r"\b(?:change|update|set|replace)\s+(.+?)'s\s+note\s+(?:to|with)\s+(.+)$",
+            t, flags=re.IGNORECASE,
+        )
+        if m:
+            item = m.group(1).strip().strip(" \"'")
+            note = m.group(2).strip().strip(" \"'")
+            if item and note:
+                return (item, note)
+
+        return None
+
+    def _handle_note_change(self, user_text: str):
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            return None
+        if not self.session_id:
+            return None
+
+        detected = self._detect_note_change(user_text)
+        if detected is None:
+            return None
+        item_name, new_note = detected
+
+        tool_res = db.update_item_instructions(self.session_id, item_name, new_note)
+
+        if tool_res.get("status") == "success":
+            final_reply = f"Updated the note on {item_name} to: {new_note}."
+        else:
+            final_reply = tool_res.get("message", "Could not update the note.")
+
+        self.messages.append({"role": "user", "content": user_text})
+        self.messages.append({"role": "assistant", "content": final_reply})
+
+        return {
+            "reply": final_reply,
+            "state": self.state,
+            "session_id": self.session_id,
+            "table_no": self.table_no,
+            "tool_calls": [{
+                "name": "update_item_instructions",
+                "arguments": {"session_id": self.session_id,
+                              "item_name": item_name,
+                              "new_instructions": new_note},
+                "result": tool_res,
+            }],
+        }
+    
+# -------- Deterministic confirm when already in REVIEW --------
     def _handle_confirm_in_review(self, user_text: str):
         """Only fires if the FSM was ALREADY in REVIEW at the start of the turn
         and the user expressed a confirm intent."""
@@ -575,6 +654,11 @@ class ShellyAgent:
             conf = self._handle_confirm_in_review(user_text)
             if conf is not None:
                 return conf
+
+        # ---------------- Note change pre-parser ----------------
+        note_change = self._handle_note_change(user_text)
+        if note_change is not None:
+            return note_change
 
         # ---------------- Allergen question pre-parser ----------------
         aller = self._handle_allergen_question(user_text)

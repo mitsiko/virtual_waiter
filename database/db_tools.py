@@ -413,6 +413,56 @@ def change_item_quantity(session_id: str, item_name: str, new_qty: int,
                order=order.get("order"))
 
 
+def update_item_instructions(session_id: str, item_name: str,
+                             new_instructions: str) -> dict:
+    """Replace the special_instructions on an existing line item.
+
+    Refuses to clear (empty) notes for now; that will be handled by the Web UI later.
+    Refuses when the item has more than one matching line.
+    """
+    if not isinstance(item_name, str) or not item_name.strip():
+        return _err("item_name must be a non-empty string.")
+    if not isinstance(new_instructions, str) or not new_instructions.strip():
+        return _err("The new note cannot be empty.")
+
+    new_instructions = new_instructions.strip()
+
+    with _connect() as conn:
+        ok_s, msg, _ = _validate_session_open(conn, session_id)
+        if not ok_s:
+            return _err(msg)
+        item = _find_item_by_name(conn, item_name)
+        if not item:
+            return _err(f"Item '{item_name}' not found on the menu.")
+
+        lines = conn.execute(
+            "SELECT line_id FROM order_line_items "
+            "WHERE session_id = ? AND item_id = ?",
+            (session_id, item["id"]),
+        ).fetchall()
+
+        if not lines:
+            return _err(f"'{item['name']}' is not in your current order.")
+        if len(lines) > 1:
+            return _err(
+                f"Multiple lines of '{item['name']}' exist in your order. "
+                f"Please remove the duplicates first, then re-add the item with the note."
+            )
+
+        line = lines[0]
+        conn.execute(
+            "UPDATE order_line_items SET special_instructions = ? WHERE line_id = ?",
+            (new_instructions, line["line_id"]),
+        )
+
+    order = view_current_order(session_id)
+    return _ok(
+        f"Updated the note on '{item['name']}' to: {new_instructions}",
+        item_name=item["name"],
+        new_instructions=new_instructions,
+        order=order.get("order"),
+    )
+
 def remove_item_from_order(session_id: str, item_name: str,
                            instructions: str | None = None) -> dict:
     with _connect() as conn:
@@ -639,6 +689,15 @@ TOOL_SCHEMAS: list[dict] = [
         }, "required": ["session_id", "item_name", "new_qty"]}}},
 
     {"type": "function", "function": {
+        "name": "update_item_instructions",
+        "description": "Replace the special instructions (note) on an item already in the order. Use this when the customer asks to change, update, or replace the note on an existing item. Do NOT add a second copy of the item.",
+        "parameters": {"type": "object", "properties": {
+            "session_id": {"type": "string"},
+            "item_name": {"type": "string", "description": "Menu item name already in the order."},
+            "new_instructions": {"type": "string", "description": "New note text (non-empty). The previous note is replaced entirely."}
+        }, "required": ["session_id", "item_name", "new_instructions"]}}},
+
+    {"type": "function", "function": {
         "name": "remove_item_from_order",
         "description": "Remove an item entirely from the current order.",
         "parameters": {"type": "object", "properties": {
@@ -688,6 +747,7 @@ TOOL_REGISTRY: dict[str, callable] = {
     "check_item_availability":  check_item_availability,
     "add_item_to_order":        add_item_to_order,
     "change_item_quantity":     change_item_quantity,
+    "update_item_instructions": update_item_instructions,
     "remove_item_from_order":   remove_item_from_order,
     "clear_session_cart":       clear_session_cart,
     "view_current_order":       view_current_order,

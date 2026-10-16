@@ -2,15 +2,15 @@
   "lab": "Lesson 6 - Conversational State Machines and Workflows",
   "agent": "Shelly",
   "model": "qwen2.5:3b (Ollama)",
-  "started_at": "2026-10-17T02:47:19",
-  "ended_at": "2026-10-17T02:49:16",
-  "final_state": "STATE_CONFIRMED",
-  "final_session_id": "T5-S001",
-  "final_table_no": 5,
+  "started_at": "2026-10-17T05:42:31",
+  "ended_at": "2026-10-17T05:46:56",
+  "final_state": "STATE_REVIEW",
+  "final_session_id": "T9-S001",
+  "final_table_no": 9,
   "final_order": {
-    "session_id": "T5-S001",
-    "table_no": 5,
-    "status": "CONFIRMED",
+    "session_id": "T9-S001",
+    "table_no": 9,
+    "status": "REVIEWING",
     "lines": [
       {
         "line_id": 1,
@@ -19,24 +19,14 @@
         "category": "Main Dishes",
         "price": 220.0,
         "quantity": 1,
-        "instructions": "",
+        "instructions": "requested vegetarian",
         "line_total": 220.0
-      },
-      {
-        "line_id": 2,
-        "item_id": 11,
-        "name": "Iced Tea",
-        "category": "Drinks",
-        "price": 50.0,
-        "quantity": 2,
-        "instructions": "",
-        "line_total": 100.0
       }
     ],
-    "subtotal": 320.0,
-    "service_fee": 32.0,
-    "grand_total": 352.0,
-    "item_count": 3
+    "subtotal": 220.0,
+    "service_fee": 22.0,
+    "grand_total": 242.0,
+    "item_count": 1
   },
   "turns": [
     {
@@ -57,81 +47,127 @@
     },
     {
       "turn": 2,
-      "user": "Table 5",
+      "user": "Table 9",
       "state_before": "STATE_GREETING",
       "state_after": "STATE_TAKING_ORDER",
-      "reply": "Thanks! Table 5 is open. What would you like to order? We have Appetizers, Main Dishes, Rice, Drinks, and Desserts.",
+      "reply": "Thanks! Table 9 is open. What would you like to order? We have Appetizers, Main Dishes, Rice, Drinks, and Desserts.",
       "tool_calls": [
         {
           "name": "create_session",
           "arguments": {
-            "table_no": 5
+            "table_no": 9
           },
           "result_status": "success",
-          "result_message": "Session T5-S001 opened for table 5."
+          "result_message": "Session T9-S001 opened for table 9."
         }
       ]
     },
     {
       "turn": 3,
-      "user": "Add 1 Chicken Adobo and 2 Iced Tea.",
+      "user": "Add 1 Chicken Adobo, no onions",
       "state_before": "STATE_TAKING_ORDER",
       "state_after": "STATE_TAKING_ORDER",
-      "reply": "I've added 1 x Chicken Adobo, 2 x Iced Tea to your order. Anything else?",
+      "reply": "I've added 1 x Chicken Adobo (no onions) to your order. The current order is ₱220.00. Would you like to add anything else?",
       "tool_calls": [
         {
           "name": "add_item_to_order",
           "arguments": {
-            "session_id": "T5-S001",
+            "instructions": "no onions",
+            "session_id": "T9-S001",
             "item_name": "Chicken Adobo",
             "qty": 1
           },
           "result_status": "success",
-          "result_message": "Added 1 x Chicken Adobo to your order."
-        },
-        {
-          "name": "add_item_to_order",
-          "arguments": {
-            "session_id": "T5-S001",
-            "item_name": "Iced Tea",
-            "qty": 2
-          },
-          "result_status": "success",
-          "result_message": "Added 2 x Iced Tea to your order."
+          "result_message": "Added 1 x Chicken Adobo (no onions) to your order."
         }
       ]
     },
     {
       "turn": 4,
-      "user": "Can I see my order?",
+      "user": "Show my order",
       "state_before": "STATE_TAKING_ORDER",
       "state_after": "STATE_REVIEW",
-      "reply": "Here is your current order: 1 x Chicken Adobo for ₱220.00 and 2 x Iced Tea for ₱100.00 each. Your subtotal is ₱320.00, service fee is ₱32.00, and the grand total is ₱352.00. Would you like to change anything?",
+      "reply": "Here is your current order: 1 x Chicken Adobo (no onions) for ₱220.00. Would you like to add anything else?",
       "tool_calls": [
         {
           "name": "view_current_order",
           "arguments": {
-            "session_id": "T5-S001"
+            "session_id": "T9-S001"
           },
           "result_status": "success",
-          "result_message": "You have 3 item(s)."
+          "result_message": "You have 1 item(s)."
         }
       ]
     },
     {
       "turn": 5,
-      "user": "Finalize my order.",
+      "user": "Change the note on the Chicken Adobo to extra sauce",
       "state_before": "STATE_REVIEW",
-      "state_after": "STATE_CONFIRMED",
-      "reply": "Your order has been confirmed! Thank you for dining at Perpetual Bistro.\n  - 1 x Chicken Adobo: ₱220.00\n  - 2 x Iced Tea: ₱100.00\nTotal: ₱352.00. Enjoy your meal!",
+      "state_after": "STATE_REVIEW",
+      "reply": "Updated the note on Chicken Adobo to: extra sauce.",
       "tool_calls": [
         {
-          "name": "confirm_order",
+          "name": "update_item_instructions",
           "arguments": {
-            "session_id": "T5-S001"
+            "session_id": "T9-S001",
+            "item_name": "Chicken Adobo",
+            "new_instructions": "extra sauce"
           },
           "result_status": "success",
-          "result_message": "Order confirmed. Thank you!"
+          "result_message": "Updated the note on 'Chicken Adobo' to: extra sauce"
+        }
+      ]
+    },
+    {
+      "turn": 6,
+      "user": "Show my order",
+      "state_before": "STATE_REVIEW",
+      "state_after": "STATE_REVIEW",
+      "reply": "Here is your updated order: 1 x Chicken Adobo (extra sauce) for ₱220.00. Would you like to add anything else?",
+      "tool_calls": [
+        {
+          "name": "view_current_order",
+          "arguments": {
+            "session_id": "T9-S001"
+          },
+          "result_status": "success",
+          "result_message": "You have 1 item(s)."
+        }
+      ]
+    },
+    {
+      "turn": 7,
+      "user": "Change the note on the Chicken Adobo to requested vegetarian",
+      "state_before": "STATE_REVIEW",
+      "state_after": "STATE_REVIEW",
+      "reply": "Updated the note on Chicken Adobo to: requested vegetarian.",
+      "tool_calls": [
+        {
+          "name": "update_item_instructions",
+          "arguments": {
+            "session_id": "T9-S001",
+            "item_name": "Chicken Adobo",
+            "new_instructions": "requested vegetarian"
+          },
+          "result_status": "success",
+          "result_message": "Updated the note on 'Chicken Adobo' to: requested vegetarian"
+        }
+      ]
+    },
+    {
+      "turn": 8,
+      "user": "Show my order",
+      "state_before": "STATE_REVIEW",
+      "state_after": "STATE_REVIEW",
+      "reply": "Here is your updated order: 1 x Chicken Adobo (requested vegetarian) for ₱220.00. Would you like to add anything else?",
+      "tool_calls": [
+        {
+          "name": "view_current_order",
+          "arguments": {
+            "session_id": "T9-S001"
+          },
+          "result_status": "success",
+          "result_message": "You have 1 item(s)."
         }
       ]
     }
