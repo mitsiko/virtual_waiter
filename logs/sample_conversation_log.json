@@ -2,31 +2,41 @@
   "lab": "Lesson 6 - Conversational State Machines and Workflows",
   "agent": "Shelly",
   "model": "qwen2.5:3b (Ollama)",
-  "started_at": "2026-10-17T05:42:31",
-  "ended_at": "2026-10-17T05:46:56",
-  "final_state": "STATE_REVIEW",
-  "final_session_id": "T9-S001",
-  "final_table_no": 9,
+  "started_at": "2026-10-23T23:21:49",
+  "ended_at": "2026-10-23T23:27:10",
+  "final_state": "STATE_CONFIRMED",
+  "final_session_id": "T5-S001",
+  "final_table_no": 5,
   "final_order": {
-    "session_id": "T9-S001",
-    "table_no": 9,
-    "status": "REVIEWING",
+    "session_id": "T5-S001",
+    "table_no": 5,
+    "status": "CONFIRMED",
     "lines": [
       {
-        "line_id": 1,
-        "item_id": 4,
-        "name": "Chicken Adobo",
-        "category": "Main Dishes",
-        "price": 220.0,
+        "line_id": 2,
+        "item_id": 11,
+        "name": "Iced Tea",
+        "category": "Drinks",
+        "price": 50.0,
+        "quantity": 3,
+        "instructions": "",
+        "line_total": 150.0
+      },
+      {
+        "line_id": 3,
+        "item_id": 10,
+        "name": "Garlic Fried Rice",
+        "category": "Rice",
+        "price": 60.0,
         "quantity": 1,
-        "instructions": "requested vegetarian",
-        "line_total": 220.0
+        "instructions": "",
+        "line_total": 60.0
       }
     ],
-    "subtotal": 220.0,
-    "service_fee": 22.0,
-    "grand_total": 242.0,
-    "item_count": 1
+    "subtotal": 210.0,
+    "service_fee": 21.0,
+    "grand_total": 231.0,
+    "item_count": 4
   },
   "turns": [
     {
@@ -47,127 +57,310 @@
     },
     {
       "turn": 2,
-      "user": "Table 9",
+      "user": "Table 5",
       "state_before": "STATE_GREETING",
       "state_after": "STATE_TAKING_ORDER",
-      "reply": "Thanks! Table 9 is open. What would you like to order? We have Appetizers, Main Dishes, Rice, Drinks, and Desserts.",
+      "reply": "Thanks! Table 5 is open. What would you like to order? We have Appetizers, Main Dishes, Rice, Drinks, and Desserts.",
       "tool_calls": [
         {
           "name": "create_session",
           "arguments": {
-            "table_no": 9
+            "table_no": 5
           },
           "result_status": "success",
-          "result_message": "Session T9-S001 opened for table 9."
+          "result_message": "Session T5-S001 opened for table 5."
         }
       ]
     },
     {
       "turn": 3,
-      "user": "Add 1 Chicken Adobo, no onions",
+      "user": "What is the capital of France?",
       "state_before": "STATE_TAKING_ORDER",
       "state_after": "STATE_TAKING_ORDER",
-      "reply": "I've added 1 x Chicken Adobo (no onions) to your order. The current order is ₱220.00. Would you like to add anything else?",
-      "tool_calls": [
-        {
-          "name": "add_item_to_order",
-          "arguments": {
-            "instructions": "no onions",
-            "session_id": "T9-S001",
-            "item_name": "Chicken Adobo",
-            "qty": 1
-          },
-          "result_status": "success",
-          "result_message": "Added 1 x Chicken Adobo (no onions) to your order."
-        }
-      ]
+      "reply": "I'm here to help with your Perpetual Bistro order. What would you like to eat or drink?",
+      "tool_calls": []
     },
     {
       "turn": 4,
-      "user": "Show my order",
+      "user": "What's the weather in Manila?",
       "state_before": "STATE_TAKING_ORDER",
-      "state_after": "STATE_REVIEW",
-      "reply": "Here is your current order: 1 x Chicken Adobo (no onions) for ₱220.00. Would you like to add anything else?",
-      "tool_calls": [
-        {
-          "name": "view_current_order",
-          "arguments": {
-            "session_id": "T9-S001"
-          },
-          "result_status": "success",
-          "result_message": "You have 1 item(s)."
-        }
-      ]
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "I'm here to help with your Perpetual Bistro order. What would you like to eat or drink?",
+      "tool_calls": []
     },
     {
       "turn": 5,
-      "user": "Change the note on the Chicken Adobo to extra sauce",
-      "state_before": "STATE_REVIEW",
-      "state_after": "STATE_REVIEW",
-      "reply": "Updated the note on Chicken Adobo to: extra sauce.",
-      "tool_calls": [
-        {
-          "name": "update_item_instructions",
-          "arguments": {
-            "session_id": "T9-S001",
-            "item_name": "Chicken Adobo",
-            "new_instructions": "extra sauce"
-          },
-          "result_status": "success",
-          "result_message": "Updated the note on 'Chicken Adobo' to: extra sauce"
-        }
-      ]
+      "user": "What is 2 + 2?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "I'm here to help with your Perpetual Bistro order. What would you like to eat or drink?",
+      "tool_calls": []
     },
     {
       "turn": 6,
-      "user": "Show my order",
-      "state_before": "STATE_REVIEW",
-      "state_after": "STATE_REVIEW",
-      "reply": "Here is your updated order: 1 x Chicken Adobo (extra sauce) for ₱220.00. Would you like to add anything else?",
-      "tool_calls": [
-        {
-          "name": "view_current_order",
-          "arguments": {
-            "session_id": "T9-S001"
-          },
-          "result_status": "success",
-          "result_message": "You have 1 item(s)."
-        }
-      ]
+      "user": "Who won the 2020 election?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "I'm here to help with your Perpetual Bistro order. What would you like to eat or drink?",
+      "tool_calls": []
     },
     {
       "turn": 7,
-      "user": "Change the note on the Chicken Adobo to requested vegetarian",
-      "state_before": "STATE_REVIEW",
-      "state_after": "STATE_REVIEW",
-      "reply": "Updated the note on Chicken Adobo to: requested vegetarian.",
+      "user": "What appetizers do you have?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "We have the following appetizers: \n- Calamari Fritters: Golden fried squid rings with calamansi aioli\n- Crispy Lumpia Shanghai: Crispy pork spring rolls served with sweet chili dip\n- Vegetable Spring Rolls: Fresh vegetable rolls with peanut sauce\n\nVegetable Spring Rolls is currently out of stock. What else would you like to order?",
       "tool_calls": [
         {
-          "name": "update_item_instructions",
+          "name": "get_menu_by_category",
           "arguments": {
-            "session_id": "T9-S001",
-            "item_name": "Chicken Adobo",
-            "new_instructions": "requested vegetarian"
+            "category": "Appetizers"
           },
           "result_status": "success",
-          "result_message": "Updated the note on 'Chicken Adobo' to: requested vegetarian"
+          "result_message": "Found 3 item(s) in Appetizers."
         }
       ]
     },
     {
       "turn": 8,
-      "user": "Show my order",
-      "state_before": "STATE_REVIEW",
+      "user": "What's in the Beef Kare-Kare?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "Beef Kare-Kare contains oxtail beef, peanut sauce, banana blossom, string beans, bok choy, and bagoong shrimp paste. It's a rich peanut sauce stew with vegetables. Would you like to add this to your order?",
+      "tool_calls": [
+        {
+          "name": "get_item_by_name",
+          "arguments": {
+            "item_name": "Beef Kare-Kare"
+          },
+          "result_status": "success",
+          "result_message": "Found item 'Beef Kare-Kare'."
+        }
+      ]
+    },
+    {
+      "turn": 9,
+      "user": "Does the Chicken Adobo have dairy?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "No, Chicken Adobo does not list dairy in its recorded allergens (recorded: soy). Please confirm with staff if the allergy is severe.",
+      "tool_calls": [
+        {
+          "name": "get_item_by_name",
+          "arguments": {
+            "item_name": "Chicken Adobo"
+          },
+          "result_status": "success",
+          "result_message": "Found item 'Chicken Adobo'."
+        },
+        {
+          "name": "check_item_allergen",
+          "arguments": {
+            "item_id": 4,
+            "allergen": "dairy"
+          },
+          "result_status": "success",
+          "result_message": "'Chicken Adobo' does not contain dairy."
+        }
+      ]
+    },
+    {
+      "turn": 10,
+      "user": "Do you have anything with peanuts?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "Items containing peanuts: Vegetable Spring Rolls, Beef Kare-Kare, Vegetable Pad Thai.",
+      "tool_calls": [
+        {
+          "name": "search_menu_by_allergen",
+          "arguments": {
+            "allergen": "peanuts",
+            "contain": true
+          },
+          "result_status": "success",
+          "result_message": "3 item(s) contain peanuts."
+        }
+      ]
+    },
+    {
+      "turn": 11,
+      "user": "Can you make the Pork Sinigang vegetarian?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "I'm sorry, our kitchen can't modify that dish's recipe. I can add a special note to your order but the dish will be prepared as described. Would you like to add a note to your order? For example, \"extra vegetables\" or \"no onions\".",
+      "tool_calls": []
+    },
+    {
+      "turn": 12,
+      "user": "Who is Shelly?",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "I'm here to help with your Perpetual Bistro order. What would you like to eat or drink?",
+      "tool_calls": []
+    },
+    {
+      "turn": 13,
+      "user": "Add 2 Chicken Adobo, no onions and 1 Iced Tea.",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "I've added 2 x Chicken Adobo (no onions), 1 x Iced Tea to your order. Anything else?",
+      "tool_calls": [
+        {
+          "name": "add_item_to_order",
+          "arguments": {
+            "session_id": "T5-S001",
+            "item_name": "Chicken Adobo",
+            "qty": 2,
+            "instructions": "no onions"
+          },
+          "result_status": "success",
+          "result_message": "Added 2 x Chicken Adobo (no onions) to your order."
+        },
+        {
+          "name": "add_item_to_order",
+          "arguments": {
+            "session_id": "T5-S001",
+            "item_name": "Iced Tea",
+            "qty": 1,
+            "instructions": ""
+          },
+          "result_status": "success",
+          "result_message": "Added 1 x Iced Tea to your order."
+        }
+      ]
+    },
+    {
+      "turn": 14,
+      "user": "Add another one.",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "Sure — which item would you like me to add? For example: '1 Chicken Adobo'.",
+      "tool_calls": []
+    },
+    {
+      "turn": 15,
+      "user": "1 Garlic Fried Rice please.",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "I've added 1 x Garlic Fried Rice to your order. Anything else?",
+      "tool_calls": [
+        {
+          "name": "add_item_to_order",
+          "arguments": {
+            "session_id": "T5-S001",
+            "item_name": "Garlic Fried Rice",
+            "qty": 1,
+            "instructions": ""
+          },
+          "result_status": "success",
+          "result_message": "Added 1 x Garlic Fried Rice to your order."
+        }
+      ]
+    },
+    {
+      "turn": 16,
+      "user": "Add 1 Vegetable Spring Rolls.",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "Sorry, 'Vegetable Spring Rolls' is out of stock or not enough left.",
+      "tool_calls": [
+        {
+          "name": "add_item_to_order",
+          "arguments": {
+            "session_id": "T5-S001",
+            "item_name": "Vegetable Spring Rolls",
+            "qty": 1,
+            "instructions": ""
+          },
+          "result_status": "error",
+          "result_message": "Sorry, 'Vegetable Spring Rolls' is out of stock or not enough left."
+        }
+      ]
+    },
+    {
+      "turn": 17,
+      "user": "Change the Iced Tea to 3.",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "Changed Iced Tea to 3. Anything else?",
+      "tool_calls": [
+        {
+          "name": "change_item_quantity",
+          "arguments": {
+            "session_id": "T5-S001",
+            "item_name": "Iced Tea",
+            "new_qty": 3
+          },
+          "result_status": "success",
+          "result_message": "Updated 'Iced Tea' to quantity 3. Your new total is ₱715.00."
+        }
+      ]
+    },
+    {
+      "turn": 18,
+      "user": "Remove the Chicken Adobo.",
+      "state_before": "STATE_TAKING_ORDER",
+      "state_after": "STATE_TAKING_ORDER",
+      "reply": "Removed Chicken Adobo from your order. (Your order now has: 3 x iced tea, 1 x garlic fried rice.)",
+      "tool_calls": [
+        {
+          "name": "remove_item_from_order",
+          "arguments": {
+            "session_id": "T5-S001",
+            "item_name": "Chicken Adobo"
+          },
+          "result_status": "success",
+          "result_message": "Removed 'Chicken Adobo' from your order."
+        }
+      ]
+    },
+    {
+      "turn": 19,
+      "user": "Show my order.",
+      "state_before": "STATE_TAKING_ORDER",
       "state_after": "STATE_REVIEW",
-      "reply": "Here is your updated order: 1 x Chicken Adobo (requested vegetarian) for ₱220.00. Would you like to add anything else?",
+      "reply": "Here is your current order at Table 5:\n- 3 x Iced Tea: ₱150.00\n- 1 x Garlic Fried Rice: ₱60.00\n\nSubtotal: ₱210.00\nService Fee (10%): ₱21.00\nTotal: ₱231.00\n\nShall I confirm this order, or would you like to change anything?",
       "tool_calls": [
         {
           "name": "view_current_order",
           "arguments": {
-            "session_id": "T9-S001"
+            "session_id": "T5-S001"
           },
           "result_status": "success",
-          "result_message": "You have 1 item(s)."
+          "result_message": "You have 4 item(s)."
+        }
+      ]
+    },
+    {
+      "turn": 20,
+      "user": "Cancel my order",
+      "state_before": "STATE_REVIEW",
+      "state_after": "STATE_REVIEW",
+      "reply": "Just to confirm — do you want to cancel your entire order? This cannot be undone. Say 'yes' to cancel or 'no' to keep it.",
+      "tool_calls": []
+    },
+    {
+      "turn": 21,
+      "user": "No",
+      "state_before": "STATE_REVIEW",
+      "state_after": "STATE_REVIEW",
+      "reply": "Okay, I won't cancel your order. What would you like to do next?",
+      "tool_calls": []
+    },
+    {
+      "turn": 22,
+      "user": "Finalize my order.",
+      "state_before": "STATE_REVIEW",
+      "state_after": "STATE_CONFIRMED",
+      "reply": "Your order has been confirmed! Thank you for dining at Perpetual Bistro.\n  - 3 x Iced Tea: ₱150.00\n  - 1 x Garlic Fried Rice: ₱60.00\nTotal: ₱231.00. Enjoy your meal!",
+      "tool_calls": [
+        {
+          "name": "confirm_order",
+          "arguments": {
+            "session_id": "T5-S001"
+          },
+          "result_status": "success",
+          "result_message": "Order confirmed. Thank you!"
         }
       ]
     }

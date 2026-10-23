@@ -44,6 +44,54 @@ ADD_INTENT_TRIGGERS = [
     "add", "i'd like", "i would like", "i'll have", "ill have",
     "get me", "order me", "bring me", "i want",
 ]
+REMOVE_INTENT_TRIGGERS = [
+    "remove", "delete", "take out", "i don't want", "i dont want",
+    "no more", "cancel the", "cancel my",
+]
+CANCEL_ORDER_TRIGGERS = [
+    "cancel my order", "cancel the order", "cancel the whole order",
+    "cancel my whole order", "cancel everything", "cancel all of it",
+    "cancel all", "forget it, cancel", "forget the order",
+]
+RESTAURANT_WHITELIST = [
+    "menu", "food", "dish", "meal", "eat", "drink", "order", "table",
+    "waiter", "waitress", "server", "manager", "staff", "restaurant",
+    "bistro", "shelly", "kitchen", "chef", "serve", "prepared", "cook",
+    "appetizer", "appetizers", "starter", "starters",
+    "main", "mains", "entree", "side", "sides",
+    "rice", "dessert", "desserts", "drinks",
+    "bill", "receipt", "checkout", "check out", "total", "subtotal",
+    "service fee", "tip", "reserve", "reservation", "hours", "open",
+    "closed", "cancel", "confirm", "add", "remove", "change",
+    "modify", "note", "instruction", "instructions",
+    "allergen", "allergens", "ingredient", "ingredients",
+    "peanut", "peanuts", "dairy", "gluten", "soy", "seafood",
+    "fish", "egg", "eggs", "vegetarian", "vegan", "spicy",
+    "sauce", "raw",
+    "chicken", "beef", "pork", "adobo", "kare-kare", "karekare",
+    "sinigang", "bangus", "pad thai", "padthai", "lumpia",
+    "calamari", "halo-halo", "halohalo", "leche flan", "lecheflan",
+    "mango graham", "mangograham", "buko", "calamansi",
+    "iced tea", "icedtea", "spring rolls", "springrolls",
+    "garlic fried rice", "white rice", "steamed rice",
+    "price", "cost", "how much", "peso", "pesos", "₱", "php",
+    "yes", "no", "okay", "ok", "sure", "please", "thanks", "thank you",
+    "hi", "hello", "hey",
+]
+
+OFF_TOPIC_TRIGGERS = [
+    "capital of", "population of", "president of", "prime minister",
+    "weather", "temperature outside", "temperature in",
+    "translate", "write a poem", "write a story", "write me a",
+    "tell me a joke", "tell me a story", "tell me about the",
+    "what year was", "what year did", "how old is the",
+    "how tall is", "how far is",
+    "meaning of life", "meaning of the universe",
+    "what's 2+2", "what is 2+2",
+    "in python", "in java", "in javascript", "in c++",
+    "algorithm for", "sorting algorithm",
+    "who won the", "won the election",
+]
 NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -157,6 +205,8 @@ class ShellyAgent:
         self.session_id: str | None = session_id
         self.table_no: int | None = table_no
         self.messages: list[dict] = []
+        self._pending_ambiguous_add: bool = False
+        self._pending_cancel: bool = False
         self._rebuild_system_prompt()
 
     def _rebuild_system_prompt(self):
@@ -211,10 +261,10 @@ class ShellyAgent:
             return {"status": "error",
                     "message": f"Arguments for {name} must be a JSON object."}
 
-        # Always trust our own session_id: override whatever the LLM passed.
         session_tools = {"add_item_to_order", "view_current_order",
                          "change_item_quantity", "remove_item_from_order",
-                         "calculate_totals", "confirm_order", "cancel_order"}
+                         "calculate_totals", "confirm_order", "cancel_order",
+                         "update_item_instructions"}
         if name in session_tools and self.session_id:
             arguments["session_id"] = self.session_id
 
@@ -223,7 +273,6 @@ class ShellyAgent:
                     "message": ("Cannot confirm yet. Please review the order first "
                                 "(say 'show my order'), then confirm.")}
 
-        # Deterministic contain override for allergen scans.
         if name == "search_menu_by_allergen":
             last_user = ""
             for m in reversed(self.messages):
@@ -245,6 +294,33 @@ class ShellyAgent:
         except Exception as e:
             return {"status": "error", "message": f"Tool {name} crashed: {e}"}
 
+    # -------- Append a tool exchange to conversation history --------
+    def _append_tool_exchange(self, user_text: str, tool_calls_made: list[dict],
+                              final_reply: str):
+        self.messages.append({"role": "user", "content": user_text})
+
+        assistant_tc = []
+        for tc in tool_calls_made:
+            assistant_tc.append({
+                "function": {
+                    "name": tc["name"],
+                    "arguments": tc.get("arguments", {}),
+                }
+            })
+        self.messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": assistant_tc,
+        })
+
+        for tc in tool_calls_made:
+            self.messages.append({
+                "role": "tool",
+                "content": json.dumps(tc["result"], ensure_ascii=False),
+            })
+
+        self.messages.append({"role": "assistant", "content": final_reply})
+
     # -------- Intent detection --------
     def _detect_review_intent(self, text: str) -> bool:
         t = text.lower()
@@ -258,9 +334,117 @@ class ShellyAgent:
         t = text.lower()
         return any(k in t for k in ADD_INTENT_TRIGGERS)
 
+    def _detect_remove_intent(self, text: str) -> bool:
+        t = text.lower()
+        return any(k in t for k in REMOVE_INTENT_TRIGGERS)
+
+    def _detect_cancel_order_intent(self, text: str) -> bool:
+        t = text.lower()
+        return any(k in t for k in CANCEL_ORDER_TRIGGERS)
+    
+    def _is_off_topic(self, text: str) -> bool:
+        t = text.lower().strip()
+        # Whitelist first: any restaurant keyword means NOT off-topic
+        if any(k in t for k in RESTAURANT_WHITELIST):
+            return False
+        # Blocklist: any known off-topic trigger means off-topic
+        if any(k in t for k in OFF_TOPIC_TRIGGERS):
+            return True
+        # Math expression check
+        if re.search(r"\bwhat(?:'s|s| is)?\s+\d+\s*[\+\-\*\/x×]\s+\d+", t):
+            return True
+        return False
+
+    def _handle_off_topic(self, user_text: str):
+        if not self._is_off_topic(user_text):
+            return None
+        final_reply = ("I'm here to help with your Perpetual Bistro order. "
+                       "What would you like to eat or drink?")
+        self.messages.append({"role": "user", "content": user_text})
+        self.messages.append({"role": "assistant", "content": final_reply})
+        return {
+            "reply": final_reply,
+            "state": self.state,
+            "session_id": self.session_id,
+            "table_no": self.table_no,
+            "tool_calls": [],
+        }
+
+    def _is_question(self, text: str) -> bool:
+        t = text.strip().lower()
+        if "?" in t:
+            return True
+        first = t.split()[0] if t.split() else ""
+        return first in ("do", "does", "is", "are", "can", "could", "what",
+                         "which", "who", "where", "why", "how")
+
+    # -------- Menu item + quantity + note extraction --------
+    def _extract_note(self, window: str) -> str:
+        """Extract a note phrase from text following an item name."""
+        patterns = [
+            r'\b(no\s+[a-z][a-z ]{0,30}?)(?=[,\.]|\s+and\s+\d|$)',
+            r'\b(without\s+[a-z][a-z ]{0,30}?)(?=[,\.]|\s+and\s+\d|$)',
+            r'\b(extra\s+[a-z][a-z ]{0,30}?)(?=[,\.]|\s+and\s+\d|$)',
+            r'\b(less\s+[a-z][a-z ]{0,30}?)(?=[,\.]|\s+and\s+\d|$)',
+            r'\b(more\s+[a-z][a-z ]{0,30}?)(?=[,\.]|\s+and\s+\d|$)',
+            r'\b(on the side)(?=[,\.]|\s+and\s+\d|$)',
+            r'\b(with\s+[a-z][a-z ]{0,30}?)(?=[,\.]|\s+and\s+\d|$)',
+        ]
+        for pat in patterns:
+            m = re.search(pat, window, flags=re.IGNORECASE)
+            if m:
+                note = m.group(1).strip()
+                note = re.sub(r'\s+and\s*$', '', note).strip()
+                if note:
+                    return note
+        return ""
+
+    def _extract_items_qty_notes(self, text: str) -> list[dict]:
+        """Return [{"name", "qty", "note"}] for each menu item mentioned."""
+        all_items = db.get_all_menu().get("items", [])
+        text_l = text.lower()
+
+        raw_hits = []
+        for item in all_items:
+            name = item["name"]
+            pos = text_l.find(name.lower())
+            if pos == -1:
+                continue
+
+            window = text_l[max(0, pos - 20):pos].strip()
+            qty = 1
+            m = re.search(r'(\d+)\s*(?:x\s*)?$', window)
+            if m:
+                qty = int(m.group(1))
+            else:
+                for word, num in NUMBER_WORDS.items():
+                    if re.search(rf'\b{word}\s*$', window):
+                        qty = num
+                        break
+            raw_hits.append({
+                "pos": pos,
+                "name": name,
+                "qty": qty,
+                "name_end": pos + len(name),
+            })
+
+        raw_hits.sort(key=lambda h: h["pos"])
+        seen: set[str] = set()
+        hits: list[dict] = []
+        for h in raw_hits:
+            if h["name"] not in seen:
+                seen.add(h["name"])
+                hits.append(h)
+
+        for i, h in enumerate(hits):
+            next_pos = hits[i + 1]["pos"] if i + 1 < len(hits) else len(text)
+            window = text[h["name_end"]:next_pos]
+            h["note"] = self._extract_note(window)
+
+        return hits
+
     # -------- Allergen question detection & handling --------
     def _detect_allergen_question(self, text: str):
-        """Returns (allergen, contain_bool) or None."""
         t = text.lower()
         allergens = ["gluten", "seafood", "peanuts", "peanut", "dairy",
                      "soy", "fish", "eggs", "egg"]
@@ -288,7 +472,9 @@ class ShellyAgent:
         return None
 
     def _handle_allergen_question(self, user_text: str):
-        if self.state != "STATE_TAKING_ORDER" or not self.session_id:
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            return None
+        if not self.session_id:
             return None
 
         detected = self._detect_allergen_question(user_text)
@@ -296,163 +482,332 @@ class ShellyAgent:
             return None
         allergen, contain = detected
 
+        # Single-item allergen question?
+        #   e.g. "Does the Chicken Adobo have dairy?" / "Is Beef Kare-Kare peanut-free?"
+        # If exactly one menu item is named, answer about THAT item.
+        hits = self._extract_items_qty_notes(user_text)
+        if len(hits) == 1:
+            item_name = hits[0]["name"]
+            item_res = db.get_item_by_name(item_name)
+            if item_res.get("status") == "success":
+                item = item_res["item"]
+                chk = db.check_item_allergen(item["id"], allergen)
+                if chk.get("status") == "success":
+                    recorded = (", ".join(chk["all_allergens"])
+                                if chk["all_allergens"] else "none")
+                    if chk["contains"]:
+                        if contain:
+                            final_reply = (
+                                f"Yes, {item['name']} contains {allergen} "
+                                f"(recorded allergens: {recorded})."
+                            )
+                        else:
+                            final_reply = (
+                                f"No, {item['name']} contains {allergen} "
+                                f"(recorded allergens: {recorded}). "
+                                f"Please avoid it if you have an allergy."
+                            )
+                    else:
+                        if contain:
+                            final_reply = (
+                                f"No, {item['name']} does not list {allergen} "
+                                f"in its recorded allergens (recorded: {recorded}). "
+                                f"Please confirm with staff if the allergy is severe."
+                            )
+                        else:
+                            final_reply = (
+                                f"{item['name']} does not list {allergen} "
+                                f"in its recorded allergens (recorded: {recorded}). "
+                                f"Please confirm with staff if the allergy is severe."
+                            )
+                    tc_list = [
+                        {"name": "get_item_by_name",
+                         "arguments": {"item_name": item_name},
+                         "result": item_res},
+                        {"name": "check_item_allergen",
+                         "arguments": {"item_id": item["id"], "allergen": allergen},
+                         "result": chk},
+                    ]
+                    self._append_tool_exchange(user_text, tc_list, final_reply)
+                    return {
+                        "reply": final_reply,
+                        "state": self.state,
+                        "session_id": self.session_id,
+                        "table_no": self.table_no,
+                        "tool_calls": tc_list,
+                    }
+
+        # Otherwise: whole-menu scan (existing behavior)
+
         tool_res = db.search_menu_by_allergen(allergen, contain=contain)
+        items = tool_res.get("items", [])
+        names = ", ".join(i["name"] for i in items) or "none"
 
-        summary_instr = (
-            f"The system just executed search_menu_by_allergen with "
-            f"allergen='{allergen}', contain={contain}. The tool returned: "
-            f"{json.dumps(tool_res, ensure_ascii=False)}. "
-            f"You are Shelly speaking to the customer in first person. Reply in "
-            f"1-2 short sentences. If contain=True, list the items that CONTAIN "
-            f"{allergen}. If contain=False, list the items that DO NOT contain "
-            f"{allergen}. Do NOT call any more tools."
+        if contain:
+            final_reply = f"Items containing {allergen}: {names}."
+        else:
+            final_reply = f"Items without {allergen}: {names}."
+
+        self._append_tool_exchange(
+            user_text,
+            [{"name": "search_menu_by_allergen",
+              "arguments": {"allergen": allergen, "contain": contain},
+              "result": tool_res}],
+            final_reply,
         )
-
-        self.messages.append({"role": "user", "content": user_text})
-        self.messages.append({"role": "system", "content": summary_instr})
-
-        try:
-            data = self._call_ollama()
-            msg = data.get("message", {}) or {}
-            final_reply = (msg.get("content") or "").strip()
-        except Exception:
-            final_reply = ""
-
-        if not final_reply:
-            items = tool_res.get("items", [])
-            names = ", ".join(i["name"] for i in items) or "none"
-            if contain:
-                final_reply = f"Items containing {allergen}: {names}."
-            else:
-                final_reply = f"Items without {allergen}: {names}."
-
-        self.messages.append({"role": "assistant", "content": final_reply})
 
         return {
             "reply": final_reply,
             "state": self.state,
             "session_id": self.session_id,
             "table_no": self.table_no,
-            "tool_calls": [{
-                "name": "search_menu_by_allergen",
-                "arguments": {"allergen": allergen, "contain": contain},
-                "result": tool_res,
-            }],
+            "tool_calls": [{"name": "search_menu_by_allergen",
+                            "arguments": {"allergen": allergen, "contain": contain},
+                            "result": tool_res}],
         }
 
-    # -------- Multi-item pre-parser --------
-    def _extract_items_and_qty(self, text: str) -> list[tuple[str, int]]:
-        all_items = db.get_all_menu().get("items", [])
-        text_l = text.lower()
-
-        hits: list[tuple[int, str, int]] = []
-        for item in all_items:
-            name = item["name"]
-            pos = text_l.find(name.lower())
-            if pos == -1:
-                continue
-
-            window = text_l[max(0, pos - 20):pos].strip()
-            qty = 1
-            m = re.search(r'(\d+)\s*(?:x\s*)?$', window)
-            if m:
-                qty = int(m.group(1))
-            else:
-                for word, num in NUMBER_WORDS.items():
-                    if re.search(rf'\b{word}\s*$', window):
-                        qty = num
-                        break
-            hits.append((pos, name, qty))
-
-        hits.sort(key=lambda h: h[0])
-        seen: set[str] = set()
-        out: list[tuple[str, int]] = []
-        for _, name, qty in hits:
-            if name not in seen:
-                seen.add(name)
-                out.append((name, qty))
-        return out
-
-    def _is_question(self, text: str) -> bool:
-        t = text.strip().lower()
-        if "?" in t:
-            return True
-        first = t.split()[0] if t.split() else ""
-        return first in ("do", "does", "is", "are", "can", "could", "what",
-                         "which", "who", "where", "why", "how")
-
-    def _handle_multi_item_add(self, user_text: str):
-        if self.state != "STATE_TAKING_ORDER" or not self.session_id:
-            return None
-        if self._is_question(user_text):
-            return None
-        if not self._detect_add_intent(user_text):
-            return None
-
-        pairs = self._extract_items_and_qty(user_text)
-        if len(pairs) < 2:
-            return None
-
-        tool_calls: list[dict] = []
-        for name, qty in pairs:
-            res = db.add_item_to_order(self.session_id, name, qty)
-            tool_calls.append({
-                "name": "add_item_to_order",
-                "arguments": {"session_id": self.session_id,
-                              "item_name": name, "qty": qty},
-                "result": res,
-            })
-
-        summary_instr = (
-            "You are Shelly speaking to the customer in first person. "
-            "The system has just added these items to their order on your behalf. "
-            "Reply with ONE short sentence confirming what was added (mention each "
-            "item and its quantity), then ask if they'd like anything else. "
-            "Say 'I've added...' NOT 'The customer added...'. "
-            "Do NOT call any tools.\n\n"
-            "Added:\n" + json.dumps(
-                [{"item": tc["arguments"]["item_name"],
-                  "qty": tc["arguments"]["qty"],
-                  "status": tc["result"].get("status"),
-                  "message": tc["result"].get("message")}
-                 for tc in tool_calls],
-                ensure_ascii=False, indent=2)
+    # -------- View order (deterministic) --------
+    def _format_order_summary(self, order: dict) -> str:
+        lines = []
+        for ln in order["lines"]:
+            note = f" ({ln['instructions']})" if ln["instructions"] else ""
+            lines.append(
+                f"- {ln['quantity']} x {ln['name']}{note}: ₱{ln['line_total']:.2f}"
+            )
+        lines_txt = "\n".join(lines)
+        return (
+            f"Here is your current order at Table {order['table_no']}:\n"
+            f"{lines_txt}\n\n"
+            f"Subtotal: ₱{order['subtotal']:.2f}\n"
+            f"Service Fee (10%): ₱{order['service_fee']:.2f}\n"
+            f"Total: ₱{order['grand_total']:.2f}\n\n"
+            f"Shall I confirm this order, or would you like to change anything?"
         )
 
+    def _handle_view_order(self, user_text: str):
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            return None
+        if not self.session_id:
+            return None
+
+        wants_review = self._detect_review_intent(user_text)
+        wants_confirm = self._detect_confirm_intent(user_text)
+        if not (wants_review or wants_confirm):
+            return None
+
+        order_res = db.view_current_order(self.session_id)
+        if order_res.get("status") != "success":
+            return None
+        order = order_res["order"]
+        if not order["lines"]:
+            return None
+
+        if self.state == "STATE_TAKING_ORDER":
+            self._set_state("STATE_REVIEW")
+
+        reply = self._format_order_summary(order)
+        self._append_tool_exchange(
+            user_text,
+            [{"name": "view_current_order",
+              "arguments": {"session_id": self.session_id},
+              "result": order_res}],
+            reply,
+        )
+
+        return {
+            "reply": reply,
+            "state": self.state,
+            "session_id": self.session_id,
+            "table_no": self.table_no,
+            "tool_calls": [{"name": "view_current_order",
+                            "arguments": {"session_id": self.session_id},
+                            "result": order_res}],
+        }
+
+    # -------- Cancel order (deterministic, with confirmation) --------
+    def _handle_cancel_order(self, user_text: str):
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            return None
+        if not self.session_id:
+            return None
+
+        if self._pending_cancel:
+            t = user_text.lower().strip()
+            yes_words = ["yes", "yeah", "yep", "yup", "sure", "confirm",
+                         "ok", "okay", "please do", "do it"]
+            no_words = ["no", "nope", "nah", "don't", "dont", "wait",
+                        "stop", "keep it", "nevermind", "never mind"]
+
+            is_yes = any(w in t for w in yes_words) and not any(w in t for w in no_words)
+            is_no = any(w in t for w in no_words)
+
+            if is_yes:
+                self._pending_cancel = False
+                res = db.cancel_order(self.session_id)
+                if res.get("status") == "success":
+                    final_reply = ("Your order has been cancelled. "
+                                   "Thank you for visiting Perpetual Bistro.")
+                    self._set_state("STATE_COMPLETED")
+                else:
+                    final_reply = res.get("message", "Could not cancel the order.")
+                self._append_tool_exchange(
+                    user_text,
+                    [{"name": "cancel_order",
+                      "arguments": {"session_id": self.session_id},
+                      "result": res}],
+                    final_reply,
+                )
+                return {
+                    "reply": final_reply,
+                    "state": self.state,
+                    "session_id": self.session_id,
+                    "table_no": self.table_no,
+                    "tool_calls": [{"name": "cancel_order",
+                                    "arguments": {"session_id": self.session_id},
+                                    "result": res}],
+                }
+            elif is_no:
+                self._pending_cancel = False
+                final_reply = ("Okay, I won't cancel your order. "
+                               "What would you like to do next?")
+                self.messages.append({"role": "user", "content": user_text})
+                self.messages.append({"role": "assistant", "content": final_reply})
+                return {
+                    "reply": final_reply,
+                    "state": self.state,
+                    "session_id": self.session_id,
+                    "table_no": self.table_no,
+                    "tool_calls": [],
+                }
+            else:
+                # Ambiguous reply; clear the flag and fall through to normal handling
+                self._pending_cancel = False
+                return None
+
+        if not self._detect_cancel_order_intent(user_text):
+            return None
+
+        # First time: ask for confirmation
+        self._pending_cancel = True
+        final_reply = ("Just to confirm — do you want to cancel your entire order? "
+                       "This cannot be undone. Say 'yes' to cancel or 'no' to keep it.")
         self.messages.append({"role": "user", "content": user_text})
-        self.messages.append({"role": "system", "content": summary_instr})
-
-        try:
-            data = self._call_ollama()
-            msg = data.get("message", {}) or {}
-            final_reply = (msg.get("content") or "").strip()
-        except Exception:
-            final_reply = ""
-
-        if not final_reply:
-            names = ", ".join(f"{q} x {n}" for n, q in pairs)
-            final_reply = f"I've added {names} to your order. Anything else?"
-
         self.messages.append({"role": "assistant", "content": final_reply})
+        return {
+            "reply": final_reply,
+            "state": self.state,
+            "session_id": self.session_id,
+            "table_no": self.table_no,
+            "tool_calls": [],
+        }
+    # -------- Remove item (deterministic) --------
+    def _handle_remove_item(self, user_text: str):
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            return None
+        if not self.session_id:
+            return None
+        if not self._detect_remove_intent(user_text):
+            return None
 
-        if self.state == "STATE_REVIEW":
+        hits = self._extract_items_qty_notes(user_text)
+        if len(hits) != 1:
+            return None
+        item_name = hits[0]["name"]
+
+        res = db.remove_item_from_order(self.session_id, item_name)
+
+        if res.get("status") == "success":
+            order_res = db.view_current_order(self.session_id)
+            remaining = "your order is now empty"
+            if order_res.get("status") == "success" and order_res["order"]["lines"]:
+                remaining = "your order now has: " + ", ".join(
+                    f"{l['quantity']} x {l['name']}"
+                    for l in order_res["order"]["lines"]
+                )
+            reply = f"Removed {item_name} from your order. ({remaining.capitalize()}.)"
+        else:
+            reply = res.get("message", f"Could not remove {item_name}.")
+
+        self._append_tool_exchange(
+            user_text,
+            [{"name": "remove_item_from_order",
+              "arguments": {"session_id": self.session_id, "item_name": item_name},
+              "result": res}],
+            reply,
+        )
+
+        if res.get("status") == "success" and self.state == "STATE_REVIEW":
             self._set_state("STATE_TAKING_ORDER")
 
         return {
-            "reply": final_reply,
+            "reply": reply,
             "state": self.state,
             "session_id": self.session_id,
             "table_no": self.table_no,
-            "tool_calls": tool_calls,
+            "tool_calls": [{"name": "remove_item_from_order",
+                            "arguments": {"session_id": self.session_id,
+                                          "item_name": item_name},
+                            "result": res}],
         }
 
-        # -------- Note change pre-parser --------
+    # -------- Change quantity (deterministic) --------
+    def _detect_change_qty(self, text: str):
+        t = text.strip()
+        m = re.search(
+            r"\b(?:change|set|update)\s+(?:the\s+)?(.+?)\s+to\s+(\d+)\b",
+            t, flags=re.IGNORECASE,
+        )
+        if m:
+            item = m.group(1).strip().strip(" \"'.,!?")
+            return (item, int(m.group(2)))
+        return None
+
+    def _handle_change_qty(self, user_text: str):
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            return None
+        if not self.session_id:
+            return None
+
+        detected = self._detect_change_qty(user_text)
+        if detected is None:
+            return None
+        item_name, new_qty = detected
+
+        res = db.change_item_quantity(self.session_id, item_name, new_qty)
+
+        if res.get("status") == "success":
+            reply = f"Changed {item_name} to {new_qty}. Anything else?"
+        else:
+            reply = res.get("message", f"Could not update {item_name}.")
+
+        self._append_tool_exchange(
+            user_text,
+            [{"name": "change_item_quantity",
+              "arguments": {"session_id": self.session_id,
+                            "item_name": item_name, "new_qty": new_qty},
+              "result": res}],
+            reply,
+        )
+
+        if res.get("status") == "success" and self.state == "STATE_REVIEW":
+            self._set_state("STATE_TAKING_ORDER")
+
+        return {
+            "reply": reply,
+            "state": self.state,
+            "session_id": self.session_id,
+            "table_no": self.table_no,
+            "tool_calls": [{"name": "change_item_quantity",
+                            "arguments": {"session_id": self.session_id,
+                                          "item_name": item_name,
+                                          "new_qty": new_qty},
+                            "result": res}],
+        }
+
+    # -------- Note change (deterministic) --------
     def _detect_note_change(self, text: str):
-        """Return (item_name, new_instructions) if the user is asking to
-        change the note on an existing item. Otherwise return None."""
         t = text.strip()
 
-        # Pattern 1: <verb> the note on/for <item> to/with <note>
         m = re.search(
             r"\b(?:change|update|set|replace)\s+the\s+note\s+(?:on|for)\s+"
             r"(.+?)\s+(?:to|with)\s+(.+)$",
@@ -467,7 +822,6 @@ class ShellyAgent:
             if item and note:
                 return (item, note)
 
-        # Pattern 2: <verb> <item>'s note to/with <note>
         m = re.search(
             r"\b(?:change|update|set|replace)\s+(.+?)'s\s+note\s+(?:to|with)\s+(.+)$",
             t, flags=re.IGNORECASE,
@@ -498,27 +852,168 @@ class ShellyAgent:
         else:
             final_reply = tool_res.get("message", "Could not update the note.")
 
-        self.messages.append({"role": "user", "content": user_text})
-        self.messages.append({"role": "assistant", "content": final_reply})
+        self._append_tool_exchange(
+            user_text,
+            [{"name": "update_item_instructions",
+              "arguments": {"session_id": self.session_id,
+                            "item_name": item_name,
+                            "new_instructions": new_note},
+              "result": tool_res}],
+            final_reply,
+        )
 
         return {
             "reply": final_reply,
             "state": self.state,
             "session_id": self.session_id,
             "table_no": self.table_no,
-            "tool_calls": [{
-                "name": "update_item_instructions",
-                "arguments": {"session_id": self.session_id,
-                              "item_name": item_name,
-                              "new_instructions": new_note},
-                "result": tool_res,
-            }],
+            "tool_calls": [{"name": "update_item_instructions",
+                            "arguments": {"session_id": self.session_id,
+                                          "item_name": item_name,
+                                          "new_instructions": new_note},
+                            "result": tool_res}],
         }
-    
-# -------- Deterministic confirm when already in REVIEW --------
+
+    # -------- Multi-item add (deterministic) --------
+    def _handle_multi_item_add(self, user_text: str):
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            return None
+        if not self.session_id:
+            return None
+        if self._is_question(user_text):
+            return None
+        if not self._detect_add_intent(user_text):
+            return None
+
+        hits = self._extract_items_qty_notes(user_text)
+
+        if len(hits) == 0:
+            final_reply = ("Sure — which item would you like me to add? "
+                           "For example: '1 Chicken Adobo'.")
+            self._pending_ambiguous_add = True
+            self.messages.append({"role": "user", "content": user_text})
+            self.messages.append({"role": "assistant", "content": final_reply})
+            return {
+                "reply": final_reply,
+                "state": self.state,
+                "session_id": self.session_id,
+                "table_no": self.table_no,
+                "tool_calls": [],
+            }
+
+        if len(hits) < 2:
+            return None
+
+        tool_calls: list[dict] = []
+        added: list[str] = []
+        errors: list[str] = []
+        for h in hits:
+            name = h["name"]
+            qty = h["qty"]
+            note = h.get("note", "")
+            res = db.add_item_to_order(self.session_id, name, qty, note)
+            tool_calls.append({
+                "name": "add_item_to_order",
+                "arguments": {"session_id": self.session_id,
+                              "item_name": name, "qty": qty,
+                              "instructions": note},
+                "result": res,
+            })
+            if res.get("status") == "success":
+                label = f"{qty} x {name}"
+                if note:
+                    label += f" ({note})"
+                added.append(label)
+            else:
+                errors.append(res.get("message", f"Could not add {name}."))
+
+        if added and not errors:
+            final_reply = (f"I've added {', '.join(added)} to your order. "
+                           f"Anything else?")
+        elif added and errors:
+            final_reply = (f"I've added {', '.join(added)}. "
+                           + " ".join(errors))
+        else:
+            final_reply = (" ".join(errors) if errors
+                           else "I couldn't add those items.")
+
+        self._append_tool_exchange(user_text, tool_calls, final_reply)
+
+        if self.state == "STATE_REVIEW":
+            self._set_state("STATE_TAKING_ORDER")
+
+        return {
+            "reply": final_reply,
+            "state": self.state,
+            "session_id": self.session_id,
+            "table_no": self.table_no,
+            "tool_calls": tool_calls,
+        }
+
+    # -------- Single-item add (deterministic) --------
+    def _handle_single_item_add(self, user_text: str):
+        if self.state not in ("STATE_TAKING_ORDER", "STATE_REVIEW"):
+            self._pending_ambiguous_add = False
+            return None
+        if not self.session_id:
+            self._pending_ambiguous_add = False
+            return None
+        if self._is_question(user_text):
+            self._pending_ambiguous_add = False
+            return None
+
+        was_pending = self._pending_ambiguous_add
+        has_intent = self._detect_add_intent(user_text)
+        if not has_intent and not was_pending:
+            return None
+
+        hits = self._extract_items_qty_notes(user_text)
+        if len(hits) != 1:
+            self._pending_ambiguous_add = False
+            return None
+
+        name = hits[0]["name"]
+        qty = hits[0]["qty"]
+        note = hits[0].get("note", "")
+
+        res = db.add_item_to_order(self.session_id, name, qty, note)
+        self._pending_ambiguous_add = False
+
+        if res.get("status") == "success":
+            label = f"{qty} x {name}"
+            if note:
+                label += f" ({note})"
+            reply = f"I've added {label} to your order. Anything else?"
+        else:
+            reply = res.get("message", f"Could not add {name}.")
+
+        self._append_tool_exchange(
+            user_text,
+            [{"name": "add_item_to_order",
+              "arguments": {"session_id": self.session_id,
+                            "item_name": name, "qty": qty,
+                            "instructions": note},
+              "result": res}],
+            reply,
+        )
+
+        if self.state == "STATE_REVIEW":
+            self._set_state("STATE_TAKING_ORDER")
+
+        return {
+            "reply": reply,
+            "state": self.state,
+            "session_id": self.session_id,
+            "table_no": self.table_no,
+            "tool_calls": [{"name": "add_item_to_order",
+                            "arguments": {"session_id": self.session_id,
+                                          "item_name": name, "qty": qty,
+                                          "instructions": note},
+                            "result": res}],
+        }
+
+    # -------- Deterministic confirm (in REVIEW) --------
     def _handle_confirm_in_review(self, user_text: str):
-        """Only fires if the FSM was ALREADY in REVIEW at the start of the turn
-        and the user expressed a confirm intent."""
         if self.state != "STATE_REVIEW" or not self.session_id:
             return None
         if not self._detect_confirm_intent(user_text):
@@ -528,7 +1023,6 @@ class ShellyAgent:
         confirm_res = db.confirm_order(self.session_id)
 
         if confirm_res.get("status") != "success":
-            # Fall through to the LLM so it can explain the error
             return None
 
         self._set_state("STATE_CONFIRMED")
@@ -537,13 +1031,13 @@ class ShellyAgent:
         if not receipt and order_snapshot.get("status") == "success":
             receipt = order_snapshot.get("order")
 
-        # Deterministic reply - the receipt is exact, no LLM needed.
         total = receipt.get("grand_total", 0) if receipt else 0
         lines_txt = ""
         if receipt and receipt.get("lines"):
             for ln in receipt["lines"]:
+                note = f" ({ln['instructions']})" if ln["instructions"] else ""
                 lines_txt += (
-                    f"\n  - {ln['quantity']} x {ln['name']}: ₱{ln['line_total']:.2f}"
+                    f"\n  - {ln['quantity']} x {ln['name']}{note}: ₱{ln['line_total']:.2f}"
                 )
         final_reply = (
             f"Your order has been confirmed! Thank you for dining at Perpetual Bistro."
@@ -551,19 +1045,22 @@ class ShellyAgent:
             f"Total: ₱{total:.2f}. Enjoy your meal!"
         )
 
-        self.messages.append({"role": "user", "content": user_text})
-        self.messages.append({"role": "assistant", "content": final_reply})
+        self._append_tool_exchange(
+            user_text,
+            [{"name": "confirm_order",
+              "arguments": {"session_id": self.session_id},
+              "result": confirm_res}],
+            final_reply,
+        )
 
         return {
             "reply": final_reply,
             "state": self.state,
             "session_id": self.session_id,
             "table_no": self.table_no,
-            "tool_calls": [{
-                "name": "confirm_order",
-                "arguments": {"session_id": self.session_id},
-                "result": confirm_res,
-            }],
+            "tool_calls": [{"name": "confirm_order",
+                            "arguments": {"session_id": self.session_id},
+                            "result": confirm_res}],
         }
 
     # -------- State transitions after tool calls --------
@@ -581,7 +1078,8 @@ class ShellyAgent:
                 self._set_state("STATE_COMPLETED")
 
         modify_tools = {"add_item_to_order", "change_item_quantity",
-                        "remove_item_from_order", "clear_session_cart"}
+                        "remove_item_from_order", "clear_session_cart",
+                        "update_item_instructions"}
         if self.state == "STATE_REVIEW":
             for tc in tool_calls_made:
                 if tc["name"] in modify_tools and tc["result"].get("status") == "success":
@@ -597,7 +1095,6 @@ class ShellyAgent:
         user_text = user_text.strip()
         state_at_start = self.state
 
-        # Confirmed -> COMPLETED on the next turn
         if self.state == "STATE_CONFIRMED":
             self._set_state("STATE_COMPLETED")
 
@@ -617,18 +1114,21 @@ class ShellyAgent:
                             f"What would you like to order? "
                             f"We have Appetizers, Main Dishes, Rice, Drinks, and Desserts."
                         )
-                        self.messages.append({"role": "user", "content": user_text})
-                        self.messages.append({"role": "assistant", "content": reply})
+                        self._append_tool_exchange(
+                            user_text,
+                            [{"name": "create_session",
+                              "arguments": {"table_no": table_no},
+                              "result": res}],
+                            reply,
+                        )
                         return {
                             "reply": reply,
                             "state": self.state,
                             "session_id": self.session_id,
                             "table_no": self.table_no,
-                            "tool_calls": [{
-                                "name": "create_session",
-                                "arguments": {"table_no": table_no},
-                                "result": res,
-                            }],
+                            "tool_calls": [{"name": "create_session",
+                                            "arguments": {"table_no": table_no},
+                                            "result": res}],
                         }
             reply = ("Welcome to Perpetual Bistro! I'm Shelly, your virtual waiter. "
                      "What's your table number?")
@@ -638,39 +1138,58 @@ class ShellyAgent:
                     "session_id": self.session_id, "table_no": self.table_no,
                     "tool_calls": []}
 
-        # ---------------- Deterministic REVIEW trigger ----------------
-        if self.state == "STATE_TAKING_ORDER" and self.session_id:
-            wants_review = self._detect_review_intent(user_text)
-            wants_confirm = self._detect_confirm_intent(user_text)
-            if wants_review or wants_confirm:
-                order = db.view_current_order(self.session_id)
-                if order.get("status") == "success" and order["order"]["lines"]:
-                    self._set_state("STATE_REVIEW")
-
-        # ---------------- Deterministic CONFIRM (only if already in REVIEW) --------
-        # Runs only when the user was ALREADY in REVIEW when the turn began,
-        # so a fresh "confirm" from TAKING_ORDER still lets them see the order first.
+        # ---------------- 1.5. Off-topic refusal (deterministic) ----------------
+        off_topic = self._handle_off_topic(user_text)
+        if off_topic is not None:
+            return off_topic
+        
+        # ---------------- 1. Deterministic CONFIRM (only if state started in REVIEW) ----
         if state_at_start == "STATE_REVIEW" and self.state == "STATE_REVIEW":
             conf = self._handle_confirm_in_review(user_text)
             if conf is not None:
                 return conf
 
-        # ---------------- Note change pre-parser ----------------
+        # ---------------- 2. View order (deterministic) ----------------
+        vo = self._handle_view_order(user_text)
+        if vo is not None:
+            return vo
+
+        # ---------------- 3. Note change (deterministic) ----------------
         note_change = self._handle_note_change(user_text)
         if note_change is not None:
             return note_change
 
-        # ---------------- Allergen question pre-parser ----------------
+        # ---------------- 4. Allergen question (deterministic) ----------------
         aller = self._handle_allergen_question(user_text)
         if aller is not None:
             return aller
 
-        # ---------------- Multi-item add pre-parser ----------------
+        # ---------------- 4b. Cancel order (deterministic) ----------------
+        cancel = self._handle_cancel_order(user_text)
+        if cancel is not None:
+            return cancel
+
+        # ---------------- 5. Remove item (deterministic) ----------------
+        rm = self._handle_remove_item(user_text)
+        if rm is not None:
+            return rm
+
+        # ---------------- 6. Change qty (deterministic) ----------------
+        cq = self._handle_change_qty(user_text)
+        if cq is not None:
+            return cq
+
+        # ---------------- 7. Multi-item add (deterministic) ----------------
         multi = self._handle_multi_item_add(user_text)
         if multi is not None:
             return multi
 
-        # ---------------- Normal LLM turn ----------------
+        # ---------------- 8. Single-item add (deterministic) ----------------
+        single = self._handle_single_item_add(user_text)
+        if single is not None:
+            return single
+
+        # ---------------- 9. Fall through to LLM (questions, refusals) ----------------
         self.messages.append({"role": "user", "content": user_text})
         all_tool_calls: list[dict] = []
         final_reply = ""
